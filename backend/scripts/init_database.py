@@ -44,12 +44,16 @@ def init_database():
                 'dining_records': """
                     CREATE TABLE dining_records (
                         id INT AUTO_INCREMENT PRIMARY KEY,
-                        timestamp DATETIME NOT NULL,
-                        customer_count INT NOT NULL,
-                        total_revenue DECIMAL(10, 2) NOT NULL,
-                        peak_hour BOOLEAN DEFAULT FALSE,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
+                        employee_id VARCHAR(50),
+                        employee_name VARCHAR(50),
+                        avatar_url VARCHAR(200),
+                        payment_time DATETIME,
+                        payment_amount DECIMAL(10, 2),
+                        dishes JSON,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_employee_id (employee_id),
+                        INDEX idx_payment_time (payment_time)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """,
                 'satisfaction': """
                     CREATE TABLE satisfaction (

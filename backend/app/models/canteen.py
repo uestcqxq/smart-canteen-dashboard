@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, DECIMAL
+from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, JSON
 from .database import Base
 import datetime
 
@@ -7,10 +7,13 @@ class DiningRecord(Base):
     __tablename__ = "dining_records"
 
     id = Column(Integer, primary_key=True, index=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
-    customer_count = Column(Integer)  # 就餐人数
-    total_revenue = Column(Float)     # 营业额
-    peak_hour = Column(Boolean)       # 是否高峰时段
+    employee_id = Column(String(50), index=True)
+    employee_name = Column(String(50))
+    avatar_url = Column(String(200))
+    payment_time = Column(DateTime, default=datetime.datetime.now)
+    payment_amount = Column(DECIMAL(10, 2))
+    dishes = Column(JSON)
+    created_at = Column(DateTime, default=datetime.datetime.now)
 
 class Satisfaction(Base):
     """满意度评价模型"""
