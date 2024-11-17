@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import dish, weather, dining
+from app.routers import dish, weather, dining, satisfaction
 import uvicorn
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
@@ -19,6 +19,7 @@ app.add_middleware(
 app.include_router(dish.router, prefix="/api")
 app.include_router(weather.router, prefix="/api")
 app.include_router(dining.router, prefix="/api")
+app.include_router(satisfaction.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup():

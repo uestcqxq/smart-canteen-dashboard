@@ -3,132 +3,91 @@ import os
 from decimal import Decimal
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from datetime import datetime, timedelta
 from ..models.database import get_db
-from ..models.canteen import DishSales
-from typing import List
-from pydantic import BaseModel
-from fastapi_cache import FastAPICache
-from fastapi_cache.decorator import cache
+from ..models.canteen import DiningRecord
+import json
 
 router = APIRouter()
 
-class DishAnalysisResponse(BaseModel):
-    name: str
-    sales: int
-    rank: str
-    avg_daily_sales: float
-    total_revenue: float
-    trend: str  # 'up', 'down', 'stable'
-
-def calculate_trend(dish_name: str, db: Session, start_date: datetime, end_date: datetime) -> str:
-    """计算菜品销售趋势"""
-    mid_date = start_date + (end_date - start_date) / 2
-    
-    # 计算前半期销量
-    first_half = db.query(func.sum(DishSales.sales_count)).filter(
-        DishSales.dish_name == dish_name,
-        DishSales.sales_time.between(start_date, mid_date)
-    ).scalar() or Decimal('0')
-    
-    # 计算后半期销量
-    second_half = db.query(func.sum(DishSales.sales_count)).filter(
-        DishSales.dish_name == dish_name,
-        DishSales.sales_time.between(mid_date, end_date)
-    ).scalar() or Decimal('0')
-    
-    # 计算趋势
-    if float(second_half) > float(first_half) * 1.1:
-        return "up"
-    elif float(second_half) < float(first_half) * 0.9:
-        return "down"
-    else:
-        return "stable"
-
 @router.get("/dish/analysis")
-@cache(expire=300)  # 缓存5分钟
-async def get_dish_analysis(days: int = 30, db: Session = Depends(get_db)):
-    """获取菜品销售分析数据"""
+async def get_dish_analysis(db: Session = Depends(get_db)):
+    """获取实时菜品销售分析"""
     try:
-        print(f"开始获取菜品分析数据，时间范围：{days}天")
+        print("开始获取菜品分析数据...")
         
-        # 计算时间范围
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
-        print(f"查询时间范围：{start_date} 至 {end_date}")
+        # 获取今天的开始时间
+        today = datetime.now().date()
+        today_start = datetime.combine(today, datetime.min.time())
         
-        # 构建SQL查询
-        query = db.query(
-            DishSales.dish_name,
-            func.sum(DishSales.sales_count).label('total_sales'),
-            func.sum(DishSales.sales_count * DishSales.price).label('total_revenue'),
-            func.avg(DishSales.sales_count).label('avg_daily_sales')
-        ).filter(
-            DishSales.sales_time.between(start_date, end_date)
-        ).group_by(
-            DishSales.dish_name
-        ).order_by(
-            desc('total_sales')
-        )
+        # 获取所有今日就餐记录
+        records = db.query(DiningRecord).filter(
+            DiningRecord.payment_time >= today_start
+        ).all()
         
-        # 打印实际执行的SQL查询
-        print("执行的SQL查询:", str(query.statement.compile(compile_kwargs={"literal_binds": True})))
+        print(f"查询到 {len(records)} 条就餐记录")
         
-        results = query.all()
-        print(f"查询到 {len(results)} 条菜品记录")
-        print("原始查询结果:", results)  # 添加原始结果的打印
+        # 统计菜品销量
+        dish_stats = {}
+        total_sales = 0
         
-        # 处理数据
-        total_dishes = len(results)
-        analysis_data = []
+        for record in records:
+            if record.dishes:
+                try:
+                    dishes = json.loads(record.dishes) if isinstance(record.dishes, str) else record.dishes
+                    print(f"处理就餐记录: {dishes}")
+                    for dish in dishes:
+                        dish_name = dish.get('name', '')
+                        if dish_name:
+                            if dish_name not in dish_stats:
+                                dish_stats[dish_name] = {
+                                    'name': dish_name,
+                                    'sales': 0,
+                                    'revenue': 0.0
+                                }
+                            dish_stats[dish_name]['sales'] += 1
+                            dish_stats[dish_name]['revenue'] += float(dish.get('price', 0))
+                            total_sales += 1
+                except Exception as e:
+                    print(f"处理菜品数据出错: {e}")
+                    continue
         
-        for i, result in enumerate(results):
-            # 计算排名等级
-            if i < total_dishes * 0.3:
-                rank = "hot"
-            elif i >= total_dishes * 0.7:
-                rank = "cold"
-            else:
-                rank = "normal"
-                
-            trend = calculate_trend(result.dish_name, db, start_date, end_date)
-            
-            # 确保所有数值都转换为适当的类型
-            item_data = {
-                "name": result.dish_name,
-                "sales": int(float(result.total_sales)),
-                "rank": rank,
-                "avg_daily_sales": round(float(result.avg_daily_sales), 2),  # 保留两位小数
-                "total_revenue": round(float(result.total_revenue), 2),  # 保留两位小数
-                "trend": trend
-            }
-            analysis_data.append(item_data)
-            print(f"处理后的菜品数据: {item_data}")  # 添加处理后数据的打印
-            
-        # 添加统计信息
-        stats = {
-            "total_dishes": total_dishes,
-            "total_sales": sum(d["sales"] for d in analysis_data),
-            "total_revenue": round(sum(d["total_revenue"] for d in analysis_data), 2),
-            "hot_dishes_count": len([d for d in analysis_data if d["rank"] == "hot"]),
-            "cold_dishes_count": len([d for d in analysis_data if d["rank"] == "cold"])
-        }
+        print(f"统计得到 {len(dish_stats)} 种菜品")
+        
+        # 转换为列表并排序
+        dish_list = list(dish_stats.values())
+        dish_list.sort(key=lambda x: x['sales'], reverse=True)
+        
+        # 计算排名和趋势
+        for i, dish in enumerate(dish_list):
+            dish['rank'] = 'hot' if i < len(dish_list) * 0.3 else ('cold' if i >= len(dish_list) * 0.7 else 'normal')
+            dish['percentage'] = round(dish['sales'] * 100 / total_sales, 2) if total_sales > 0 else 0
         
         response_data = {
-            "code": 200,  # 添加状态码
-            "data": analysis_data,
-            "stats": stats,
-            "message": "success"  # 添加状态消息
+            "code": 200,
+            "message": "success",
+            "data": {
+                "dishes": dish_list,
+                "stats": {
+                    "total_dishes": len(dish_list),
+                    "total_sales": total_sales,
+                    "total_revenue": sum(dish['revenue'] for dish in dish_list),
+                    "hot_dishes_count": len([d for d in dish_list if d['rank'] == 'hot']),
+                    "cold_dishes_count": len([d for d in dish_list if d['rank'] == 'cold'])
+                },
+                "update_time": datetime.now().strftime("%H:%M:%S")
+            }
         }
         
-        print("完整返回数据:", response_data)  # 打印完整返回数据
-        
+        print("返回数据:", response_data)
         return response_data
         
     except Exception as e:
-        print(f"处理数据时出错: {e}")
-        print(f"错误详情: ", str(e.__traceback__))  # 添加更详细的错误信息
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"获取菜品分析数据出错: {str(e)}")
+        return {
+            "code": 500,
+            "message": str(e)
+        }

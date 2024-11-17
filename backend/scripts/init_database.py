@@ -4,6 +4,7 @@ import random
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
+import json
 
 # 加载环境变量
 load_dotenv()
@@ -51,7 +52,6 @@ def init_database():
                         payment_amount DECIMAL(10, 2),
                         dishes JSON,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        INDEX idx_employee_id (employee_id),
                         INDEX idx_payment_time (payment_time)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """,
@@ -60,19 +60,9 @@ def init_database():
                         id INT AUTO_INCREMENT PRIMARY KEY,
                         rating INT NOT NULL CHECK (rating BETWEEN 1 AND 5),
                         comment VARCHAR(500),
-                        timestamp DATETIME NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """,
-                'dish_sales': """
-                    CREATE TABLE dish_sales (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        dish_name VARCHAR(100) NOT NULL,
-                        price DECIMAL(10, 2) NOT NULL,
-                        sales_count INT NOT NULL,
-                        sales_time DATETIME NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_created_at (created_at)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             }
             
@@ -91,89 +81,105 @@ def generate_mock_data(cursor):
     try:
         # 常见菜品列表
         dishes = [
-            ("红烧肉", 15.00),
-            ("清炒时蔬", 8.00),
-            ("鱼香肉丝", 12.00),
-            ("番茄炒蛋", 10.00),
-            ("宫保鸡丁", 13.00),
-            ("米饭", 2.00),
-            ("馒头", 1.00),
-            ("水饺", 12.00),
-            ("炒面", 10.00),
-            ("汤面", 8.00)
+            {"name": "红烧肉", "price": 15.00},
+            {"name": "清炒时蔬", "price": 8.00},
+            {"name": "鱼香肉丝", "price": 12.00},
+            {"name": "番茄炒蛋", "price": 10.00},
+            {"name": "宫保鸡丁", "price": 13.00},
+            {"name": "米饭", "price": 2.00},
+            {"name": "馒头", "price": 1.00},
+            {"name": "水饺", "price": 12.00},
+            {"name": "炒面", "price": 10.00},
+            {"name": "汤面", "price": 8.00}
         ]
 
-        # 生成一个月的数据
-        start_date = datetime.now() - timedelta(days=30)
-        current_date = start_date
-        end_date = datetime.now()
-
-        print("开始生成模拟数据...")
-        record_count = 0
-
-        while current_date < end_date:
-            # 每天三个就餐时段
-            for hour in [7, 12, 18]:  # 早餐、午餐、晚餐
-                # 基础就餐人数
-                base_customers = {
-                    7: random.randint(100, 200),   # 早餐
-                    12: random.randint(300, 500),  # 午餐
-                    18: random.randint(200, 400)   # 晚餐
-                }[hour]
+        # 生成今天不同时段的就餐记录
+        current_date = datetime.now().date()
+        
+        # 生成不同时段的就餐记录
+        for hour in range(7, 20):  # 从早上7点到晚上8点
+            # 每个小时生成多条记录
+            records_count = random.randint(5, 15)
+            for _ in range(records_count):
+                # 生成随机时间（在当前小时内）
+                minutes = random.randint(0, 59)
+                current_time = datetime.combine(current_date, datetime.min.time().replace(hour=hour, minute=minutes))
                 
-                # 考虑工作日和周末的差异
-                is_weekend = current_date.weekday() >= 5
-                if is_weekend:
-                    base_customers = int(base_customers * 0.7)
+                # 生成员工信息
+                employee_id = f"EMP{random.randint(1000, 9999)}"
+                employee_name = f"员工{random.randint(1, 200)}"
                 
-                timestamp = current_date.replace(hour=hour, minute=0, second=0)
-                customer_count = base_customers
-                avg_consumption = random.uniform(15, 25)
-                total_revenue = customer_count * avg_consumption
-                peak_hour = 1 if customer_count > 300 else 0
-
+                # 生成随机菜品（1-4个菜）
+                meal_dishes = []
+                dish_count = random.randint(1, 4)
+                selected_dishes = random.sample(dishes, dish_count)
+                for dish in selected_dishes:
+                    meal_dishes.append(dish)
+                
+                # 计算总金额
+                total_amount = sum(dish["price"] for dish in meal_dishes)
+                
                 # 插入就餐记录
                 cursor.execute("""
-                    INSERT INTO dining_records (timestamp, customer_count, total_revenue, peak_hour)
-                    VALUES (%s, %s, %s, %s)
-                """, (timestamp, customer_count, total_revenue, peak_hour))
-                record_count += 1
-
-                # 生成满意度评价
-                num_ratings = int(customer_count * 0.1)
-                for _ in range(num_ratings):
-                    rating = random.choices([5,4,3,2,1], weights=[0.4,0.3,0.2,0.07,0.03])[0]
-                    comment = None
-                    if rating <= 3:
-                        comments = [
-                            "菜品不够新鲜", "服务态度需要改善", "等待时间太长",
-                            "价格偏高", "口味一般", "环境需要改善"
-                        ]
-                        comment = random.choice(comments)
-
-                    cursor.execute("""
-                        INSERT INTO satisfaction (rating, comment, timestamp)
-                        VALUES (%s, %s, %s)
-                    """, (rating, comment, timestamp))
-
-                # 生成菜品销售记录
-                for dish_name, price in dishes:
-                    base_sales = random.randint(20, 50)
-                    if hour == 12:
-                        base_sales *= 1.5
-                    if is_weekend:
-                        base_sales *= 0.7
-                    
-                    sales_count = int(base_sales)
-                    print(f"插入菜品销售记录: {dish_name}, 价格: {price}, 销量: {sales_count}, 时间: {timestamp}")
-                    cursor.execute("""
-                        INSERT INTO dish_sales (dish_name, price, sales_count, sales_time)
-                        VALUES (%s, %s, %s, %s)
-                    """, (dish_name, price, sales_count, timestamp))
-
-            current_date += timedelta(days=1)
+                    INSERT INTO dining_records 
+                    (employee_id, employee_name, payment_time, payment_amount, dishes)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    employee_id,
+                    employee_name,
+                    current_time,
+                    total_amount,
+                    json.dumps(meal_dishes)
+                ))
+                
+                print(f"生成就餐记录: {employee_name} 在 {current_time} 消费 {total_amount}")
+        
+        print("成功生成就餐记录")
+        
+        # 生成满意度评价数据
+        print("开始生成满意度评价数据...")
+        
+        # 生成今天的满意度评价
+        current_date = datetime.now()
+        
+        # 生成100条满意度评价
+        for _ in range(100):
+            # 生成随机评分（1-5分，倾向于好评）
+            rating = random.choices(
+                [5, 4, 3, 2, 1],
+                weights=[0.4, 0.3, 0.15, 0.1, 0.05]  # 权重分配，好评占比更高
+            )[0]
             
-        print(f"成功生成 {record_count} 条就餐记录")
+            # 生成评价时间（今天内的随机时间）
+            hours = random.randint(0, 23)
+            minutes = random.randint(0, 59)
+            seconds = random.randint(0, 59)
+            rating_time = current_date.replace(hour=hours, minute=minutes, second=seconds)
+            
+            # 生成评价内容
+            comment = None
+            if rating <= 3:  # 低分时生成评价内容
+                comments = [
+                    "菜品不够新鲜",
+                    "服务态度需要改善",
+                    "等待时间太长",
+                    "价格偏高",
+                    "口味一般",
+                    "环境需要改善",
+                    "分量太少",
+                    "种类不够丰富",
+                    "餐具不够干净",
+                    "出餐速度慢"
+                ]
+                comment = random.choice(comments)
+            
+            # 插入满意度评价
+            cursor.execute("""
+                INSERT INTO satisfaction (rating, comment, created_at)
+                VALUES (%s, %s, %s)
+            """, (rating, comment, rating_time))
+        
+        print("成功生成满意度评价数据")
         return True
 
     except Error as e:
